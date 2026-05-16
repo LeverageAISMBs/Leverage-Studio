@@ -33,7 +33,8 @@ const App: React.FC = () => {
   const [lyricsOption, setLyricsOption] = useState<LyricsOption>('Auto');
   const [customLyrics, setCustomLyrics] = useState('');
   const [gen, setGen] = useState<GenerationState>({ results: [] });
-  const [isResultPlaying, setIsResultPlaying] = useState<string | null>(null);
+  const [currentTrackId, setCurrentTrackId] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [encodingVideoId, setEncodingVideoId] = useState<string | null>(null);
   const [encodingProgress, setEncodingProgress] = useState(0);
   const [selectedImages, setSelectedImages] = useState<{data: string, mimeType: string, previewUrl: string}[]>([]);
@@ -199,7 +200,7 @@ const App: React.FC = () => {
     const newId = Math.random().toString(36).substring(7);
     const newResult: SongResult = {
       id: newId, status: 'generating', logs: [], audioUrl: null, coverImageUrl: null, title: null, lyrics: '', metadata: '', fullPrompt: null, error: null, duration: activeDuration, timestamp: new Date(), isExpanded: true,
-      originalPrompt: activePrompt, originalDuration: activeDuration, originalLyricsOption: activeLyricsOption
+      originalPrompt: activePrompt, originalDuration: activeDuration, originalLyricsOption: activeLyricsOption, originalCustomLyrics: activeCustomLyrics
     };
     setGen(prev => ({ results: [newResult, ...prev.results.map(r => ({ ...r, isExpanded: false }))] }));
     const modelId = activeDuration === 'Pro' ? CONFIG.MODEL_ID_FULL : CONFIG.MODEL_ID_SHORT;
@@ -275,10 +276,77 @@ const App: React.FC = () => {
     );
   };
 
+  const handleRemix = (result: SongResult) => {
+    setPrompt(result.originalPrompt);
+    setDuration(result.originalDuration);
+    setLyricsOption(result.originalLyricsOption);
+    if (result.originalLyricsOption === 'Custom' && result.originalCustomLyrics) {
+      setCustomLyrics(result.originalCustomLyrics);
+    }
+    setIsPromptManual(true);
+    setIsHelperOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handlePlayPauseGlobal = () => {
+    if (!currentTrackId) return;
+    const audio = document.getElementById(`audio-${currentTrackId}`) as HTMLAudioElement;
+    if (audio) {
+      if (audio.paused) {
+        audio.play();
+      } else {
+        audio.pause();
+      }
+    }
+  };
+
+  const handleGlobalSkip = (direction: 'next' | 'prev') => {
+    if (!currentTrackId) return;
+    const completedResults = gen.results.filter(r => r.audioUrl);
+    if (completedResults.length === 0) return;
+    const currentIndex = completedResults.findIndex(r => r.id === currentTrackId);
+    if (currentIndex === -1) return;
+    
+    let newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+    if (newIndex >= completedResults.length) newIndex = 0;
+    if (newIndex < 0) newIndex = completedResults.length - 1;
+    
+    const nextResult = completedResults[newIndex];
+    if (nextResult && nextResult.id !== currentTrackId) {
+      const currentAudio = document.getElementById(`audio-${currentTrackId}`) as HTMLAudioElement;
+      if (currentAudio) currentAudio.pause();
+      
+      const nextAudio = document.getElementById(`audio-${nextResult.id}`) as HTMLAudioElement;
+      if (nextAudio) {
+        nextAudio.play();
+      }
+    }
+  };
+
+  const handleAudioPlay = (id: string) => {
+    setIsPlaying(true);
+    setCurrentTrackId(prevId => {
+      if (prevId && prevId !== id) {
+        const prevAudio = document.getElementById(`audio-${prevId}`) as HTMLAudioElement;
+        if (prevAudio) prevAudio.pause();
+      }
+      return id;
+    });
+  };
+
+  const handleAudioPause = (id: string) => {
+    setCurrentTrackId(prevId => {
+      if (prevId === id) setIsPlaying(false);
+      return prevId;
+    });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleGenerate(); };
 
+  const currentTrack = currentTrackId ? gen.results.find(r => r.id === currentTrackId) : null;
+
   return (
-    <div className="min-h-screen flex flex-col pb-20 overflow-x-hidden" onClick={() => setActiveSelector(null)}>
+    <div className="min-h-screen flex flex-col pb-32 overflow-x-hidden" onClick={() => setActiveSelector(null)}>
       <nav className="sticky top-0 z-50 glass border-b border-gray-200/50 h-14 flex items-center px-6 justify-between">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 music-gradient rounded-lg flex items-center justify-center text-white font-bold text-xs">LYRIA</div>
@@ -452,7 +520,7 @@ const App: React.FC = () => {
                       {isEncoding && <div className="absolute inset-0 bg-white/40 backdrop-blur-[2px] flex items-center justify-center"><Icons.Loading className={`${isExpanded ? 'w-12 h-12' : 'w-6 h-6'} text-blue-600 animate-spin`} /></div>}
                       <button onClick={(e) => { e.stopPropagation(); if (isGenerating) return; const audio = document.getElementById(`audio-${result.id}`) as HTMLAudioElement; if (audio) audio.paused ? audio.play() : audio.pause(); }} disabled={(!result.audioUrl && !isGenerating) || isEncoding} className={`absolute inset-0 flex items-center justify-center text-white z-10 transition-opacity duration-300 ${isExpanded || isGenerating ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} ${isEncoding ? 'cursor-wait' : 'cursor-pointer'}`}>
                         <div className={`music-gradient backdrop-blur-xl rounded-full flex items-center justify-center border border-white/40 shadow-2xl hover:scale-110 transition-transform ${isExpanded ? 'w-16 h-16' : 'w-10 h-10'}`}>
-                          {isGenerating ? <Icons.Loading className={`${isExpanded ? 'w-8 h-8' : 'w-5 h-5'} animate-spin`} /> : isResultPlaying === result.id ? <Icons.Pause className={isExpanded ? 'w-8 h-8' : 'w-5 h-5'} /> : <Icons.Play className={`${isExpanded ? 'w-8 h-8' : 'w-5 h-5'} ml-1`} />}
+                          {isGenerating ? <Icons.Loading className={`${isExpanded ? 'w-8 h-8' : 'w-5 h-5'} animate-spin`} /> : (currentTrackId === result.id && isPlaying) ? <Icons.Pause className={isExpanded ? 'w-8 h-8' : 'w-5 h-5'} /> : <Icons.Play className={`${isExpanded ? 'w-8 h-8' : 'w-5 h-5'} ml-1`} />}
                         </div>
                       </button>
                     </div>
@@ -464,11 +532,17 @@ const App: React.FC = () => {
                             {isFailed ? 'Processing Failed' : (result.title || (isGenerating ? "Synthesizing..." : "Untitled Composition"))}
                           </h4>
                           {(isFailed || result.audioUrl) && (
-                            <div className="relative" onClick={e => e.stopPropagation()}>
-                              <button onClick={() => handleGenerate({ prompt: result.originalPrompt, duration: result.originalDuration, lyricsOption: result.originalLyricsOption })} className="flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-blue-100 border border-blue-200 text-blue-600 text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-blue-200 transition-all shadow-sm active:scale-95 z-20">
+                            <div className="relative flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                              <button onClick={() => handleGenerate({ prompt: result.originalPrompt, duration: result.originalDuration, lyricsOption: result.originalLyricsOption, customLyrics: result.originalCustomLyrics })} className="flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-blue-100 border border-blue-200 text-blue-600 text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-blue-200 transition-all shadow-sm active:scale-95 z-20">
                                 <Icons.RefreshCw className="w-3.5 h-3.5 shrink-0" />
                                 <span>{isFailed ? 'Retry' : 'Regenerate'}</span>
                               </button>
+                              {!isFailed && (
+                                <button onClick={() => handleRemix(result)} className="flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-gray-100 border border-gray-200 text-gray-600 text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-gray-200 transition-all shadow-sm active:scale-95 z-20">
+                                  <Icons.Edit className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Remix</span>
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -481,7 +555,7 @@ const App: React.FC = () => {
                       <div className={`transition-all duration-700 ease-in-out overflow-visible ${isExpanded ? 'max-h-[200px] mt-6 opacity-100' : 'max-h-0 opacity-0'}`}>
                         {result.audioUrl && (
                           <div className="space-y-4">
-                            <audio id={`audio-${result.id}`} onPlay={() => setIsResultPlaying(result.id)} onPause={() => setIsResultPlaying(null)} controls className="h-10 w-full rounded-2xl"><source src={result.audioUrl} /></audio>
+                            <audio id={`audio-${result.id}`} onPlay={() => handleAudioPlay(result.id)} onPause={() => handleAudioPause(result.id)} controls className="h-10 w-full rounded-2xl"><source src={result.audioUrl} /></audio>
                             <div className="flex gap-4 items-start relative">
                               <div className="flex-1 relative group/download" onClick={e => e.stopPropagation()}>
                                 <button onClick={(e) => { e.stopPropagation(); handleDownload(result); }} className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-blue-600 text-white text-[10px] font-bold uppercase tracking-[0.1em] hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 active:scale-95 ${isEncoding ? 'opacity-50 cursor-wait' : ''}`} disabled={isEncoding}>
@@ -546,6 +620,47 @@ const App: React.FC = () => {
           })}
         </div>
       </main>
+
+      {/* Global Playback Control Bar */}
+      {currentTrack && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200/50 p-4 px-6 flex items-center justify-between z-50 shadow-[0_-20px_40px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-4 duration-300">
+          <div className="flex items-center gap-4 w-1/3">
+            <div className="w-12 h-12 rounded-xl overflow-hidden shadow-md shrink-0">
+              {currentTrack.coverImageUrl ? (
+                <img src={currentTrack.coverImageUrl} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-gray-100 flex items-center justify-center"><Icons.Sparkles className="w-5 h-5 text-gray-400" /></div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <h4 className="font-bold text-sm tracking-tight text-gray-900 truncate">{currentTrack.title || "Untitled"}</h4>
+              <p className="text-xs text-gray-500 font-medium truncate">Lyria 3 • {currentTrack.duration}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-6 w-1/3">
+            <button onClick={() => handleGlobalSkip('prev')} className="text-gray-400 hover:text-gray-900 transition-colors shrink-0">
+              <Icons.SkipBack className="w-6 h-6" />
+            </button>
+            <button 
+              onClick={handlePlayPauseGlobal}
+              className="w-12 h-12 bg-black hover:bg-gray-800 text-white rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95 shrink-0"
+            >
+              {isPlaying ? <Icons.Pause className="w-5 h-5" /> : <Icons.Play className="w-5 h-5 ml-1" />}
+            </button>
+            <button onClick={() => handleGlobalSkip('next')} className="text-gray-400 hover:text-gray-900 transition-colors shrink-0">
+              <Icons.SkipForward className="w-6 h-6" />
+            </button>
+          </div>
+
+          <div className="w-1/3 flex justify-end">
+            <button onClick={() => handleDownload(currentTrack)} className="text-gray-400 hover:text-blue-600 transition-colors p-2" title="Download Audio">
+              <Icons.Download className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }

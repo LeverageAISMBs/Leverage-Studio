@@ -32,6 +32,7 @@ export interface SongResult {
   originalPrompt: string;
   originalDuration: Duration;
   originalLyricsOption: LyricsOption;
+  originalCustomLyrics?: string;
 }
 
 export interface GenerationState {
